@@ -1,20 +1,14 @@
-'use client';
+"use client";
 
-import React, { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { TaskStatus } from '@/types';
-import apiClient from '@/lib/axios';
-import { RescheduleModal } from '@/features/tasks/components/RescheduleModal';
+import React, { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { TaskStatus } from "@/types";
+import apiClient from "@/lib/axios";
+import { RescheduleModal } from "@/features/tasks/components/RescheduleModal";
+import { ProtectedRoute } from "@/shared/components/ProtectedRoute";
 
 // ============================================================
 // TIPOS
-// ============================================================
-//
-// Estos tipos representan la información que recibimos
-// desde el backend.
-//
-// No utilizamos el mock anterior porque ahora los datos
-// vienen directamente de Django.
 // ============================================================
 
 interface EventTask {
@@ -32,216 +26,140 @@ interface Event {
   event_date: string;
   tasks: EventTask[];
 
-  // Estos valores también vienen del backend.
+  // Datos de progreso enviados por Django
   progress_percentage: number;
   total_tasks: number;
   completed_tasks: number;
 }
 
-
 // ============================================================
-// COMPONENTE
+// PÁGINA PROTEGIDA
 // ============================================================
 
 export default function EventDetailPage() {
+  return (
+    <ProtectedRoute>
+      <EventDetailContent />
+    </ProtectedRoute>
+  );
+}
 
+// ============================================================
+// CONTENIDO DEL DETALLE
+// ============================================================
+
+function EventDetailContent() {
   // ============================================================
-  // OBTENER EL ID DE LA URL
+  // OBTENER ID DE LA URL
   // ============================================================
-  //
-  // Si estamos en:
-  //
-  // /actividad/15
-  //
-  // params.id será:
-  //
-  // "15"
-  //
+
   const params = useParams<{ id: string }>();
 
   const eventId = params.id;
-
 
   // ============================================================
   // ESTADOS
   // ============================================================
 
-  // Evento que viene desde Django.
+  // Evento recibido desde Django
   const [event, setEvent] = useState<Event | null>(null);
 
-  // Indica si estamos esperando la respuesta del backend.
+  // Estado de carga
   const [isLoading, setIsLoading] = useState(true);
 
-  // Guarda un posible error de carga.
+  // Error de carga
   const [error, setError] = useState<string | null>(null);
 
-  // Guarda temporalmente qué tarea estamos actualizando.
-  //
-  // Esto sirve para evitar que el usuario haga varios clics
-  // mientras Django está procesando el PATCH.
+  // Tarea que está siendo actualizada
   const [updatingTaskId, setUpdatingTaskId] = useState<number | null>(null);
-  const [taskToReschedule, setTaskToReschedule] = useState<EventTask | null>(null);
-  const [rescheduleSuccess, setRescheduleSuccess] = useState('');
 
+  // Tarea seleccionada para reprogramar
+  const [taskToReschedule, setTaskToReschedule] = useState<EventTask | null>(
+    null,
+  );
+
+  // Mensaje de éxito
+  const [rescheduleSuccess, setRescheduleSuccess] = useState("");
 
   // ============================================================
-  // OBTENER EL EVENTO
+  // OBTENER EVENTO
   // ============================================================
-  //
-  // Endpoint:
-  //
-  // GET /api/v1/events/{id}/
-  //
-  // Este endpoint devuelve:
-  //
-  // - información del evento
-  // - tareas asociadas
-  // - progreso
-  //
+
   const loadEvent = async () => {
-
     try {
-
       setIsLoading(true);
       setError(null);
 
-      // --------------------------------------------------------
       // GET /api/v1/events/{id}/
-      // --------------------------------------------------------
+      const response = await apiClient.get<Event>(`/events/${eventId}/`);
 
-      const response = await apiClient.get<Event>(
-        `/events/${eventId}/`
-      );
+      console.log("Evento recibido desde Django:", response.data);
 
-      console.log(
-        'Evento recibido desde Django:',
-        response.data
-      );
-
-      // Guardamos el evento real.
+      // Guardamos el evento
       setEvent(response.data);
-
     } catch (error) {
+      console.error("Error al cargar el evento:", error);
 
-      console.error(
-        'Error al cargar el evento:',
-        error
-      );
-
-      setError(
-        'No fue posible cargar el evento.'
-      );
-
+      setError("No fue posible cargar el evento.");
     } finally {
-
       setIsLoading(false);
     }
   };
 
-
   // ============================================================
   // CARGAR EVENTO AL ABRIR LA PÁGINA
   // ============================================================
-  //
-  // Cuando entramos a:
-  //
-  // /actividad/15
-  //
-  // se ejecuta el GET.
-  //
-  useEffect(() => {
 
+  useEffect(() => {
     if (!eventId) {
       return;
     }
 
     loadEvent();
-
   }, [eventId]);
-
 
   // ============================================================
   // CAMBIAR ESTADO DE UNA TAREA
   // ============================================================
-  //
-  // Cuando el usuario marca/desmarca una tarea:
-  //
-  // PATCH /api/v1/tasks/{id}/
-  //
-  // enviamos solamente el campo que queremos modificar:
-  //
-  // {
-  //   "status": "completed"
-  // }
-  //
+
   const handleTaskStatusChange = async (
     taskId: number,
-    currentStatus: TaskStatus
+    currentStatus: TaskStatus,
   ) => {
-
-    // ----------------------------------------------------------
-    // Evitamos que se hagan dos peticiones simultáneamente
-    // sobre la misma tarea.
-    // ----------------------------------------------------------
-
+    // Evitamos peticiones simultáneas
     if (updatingTaskId !== null) {
       return;
     }
 
     try {
-
       setUpdatingTaskId(taskId);
 
-      // --------------------------------------------------------
-      // Determinamos el nuevo estado
-      // --------------------------------------------------------
-      //
-      // Si estaba completada:
-      //
-      // completed → pending
-      //
-      // Si estaba pendiente:
-      //
-      // pending → completed
-      //
-      const newStatus =
-        currentStatus === 'completed'
-          ? 'pending'
-          : 'completed';
+      // ========================================================
+      // DETERMINAR NUEVO ESTADO
+      // ========================================================
 
+      const newStatus = currentStatus === "completed" ? "pending" : "completed";
 
-      // --------------------------------------------------------
+      // ========================================================
       // PATCH /api/v1/tasks/{id}/
-      // --------------------------------------------------------
-      //
-      // Solo modificamos el estado.
-      //
-      await apiClient.patch(
-        `/tasks/${taskId}/`,
-        {
-          status: newStatus,
-        }
-      );
+      // ========================================================
 
+      await apiClient.patch(`/tasks/${taskId}/`, {
+        status: newStatus,
+      });
 
-      // --------------------------------------------------------
-      // Actualizamos el estado local
-      // --------------------------------------------------------
-      //
-      // No necesitamos volver a descargar todo el evento
-      // solamente para actualizar visualmente el checkbox.
-      //
+      // ========================================================
+      // ACTUALIZAR ESTADO LOCAL
+      // ========================================================
+
       setEvent((currentEvent) => {
-
         if (!currentEvent) {
           return currentEvent;
         }
 
-        // Actualizamos la tarea que acabamos de modificar.
+        // Actualizamos la tarea
         const updatedTasks = currentEvent.tasks.map((task) => {
-
           if (task.id === taskId) {
-
             return {
               ...task,
               status: newStatus as TaskStatus,
@@ -251,339 +169,234 @@ export default function EventDetailPage() {
           return task;
         });
 
-
-        // ------------------------------------------------------
-        // Calculamos nuevamente el progreso
-        // ------------------------------------------------------
+        // ======================================================
+        // CALCULAR PROGRESO
+        // ======================================================
 
         const completedTasks = updatedTasks.filter(
-          (task) => task.status === 'completed'
+          (task) => task.status === "completed",
         ).length;
 
         const totalTasks = updatedTasks.length;
 
         const progressPercentage =
-          totalTasks > 0
-            ? Math.round(
-                (completedTasks / totalTasks) * 100
-              )
-            : 0;
+          totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
+        // ======================================================
+        // DEVOLVER EVENTO ACTUALIZADO
+        // ======================================================
 
-        // Devolvemos el evento actualizado.
         return {
           ...currentEvent,
-
           tasks: updatedTasks,
-
           completed_tasks: completedTasks,
-
           total_tasks: totalTasks,
-
           progress_percentage: progressPercentage,
         };
       });
-
     } catch (error) {
+      console.error("Error al actualizar la tarea:", error);
 
-      console.error(
-        'Error al actualizar la tarea:',
-        error
-      );
-
-      // Si Django rechaza el PATCH, no modificamos
-      // visualmente la tarea.
-      alert(
-        'No fue posible actualizar el estado de la tarea.'
-      );
-
+      alert("No fue posible actualizar el estado de la tarea.");
     } finally {
-
       setUpdatingTaskId(null);
     }
   };
-
 
   // ============================================================
   // ESTADO DE CARGA
   // ============================================================
 
   if (isLoading) {
-
     return (
-      <div className="p-8 max-w-5xl mx-auto">
-
-        <p className="text-sm text-gray-500">
-          Cargando plan logístico...
-        </p>
-
+      <div className="mx-auto max-w-5xl p-8">
+        <p className="text-sm text-gray-500">Cargando plan logístico...</p>
       </div>
     );
   }
-
 
   // ============================================================
   // ESTADO DE ERROR
   // ============================================================
 
   if (error || !event) {
-
     return (
-      <div className="p-8 max-w-5xl mx-auto">
-
+      <div className="mx-auto max-w-5xl p-8">
         <div className="rounded-xl border border-red-200 bg-red-50 p-6">
-
           <p className="text-sm text-red-600">
-            {error || 'No se encontró el evento.'}
+            {error || "No se encontró el evento."}
           </p>
-
         </div>
-
       </div>
     );
   }
 
-
   // ============================================================
   // DATOS PARA EL PROGRESO
   // ============================================================
-  //
-  // Los calculamos desde las tareas que tenemos actualmente
-  // en pantalla.
-  //
+
   const completedTasks = event.tasks.filter(
-    (task) => task.status === 'completed'
+    (task) => task.status === "completed",
   ).length;
 
   const totalTasks = event.tasks.length;
 
   const progressPercentage =
-    totalTasks > 0
-      ? Math.round(
-          (completedTasks / totalTasks) * 100
-        )
-      : 0;
-
+    totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
   // ============================================================
   // INTERFAZ
   // ============================================================
 
   return (
-
-    <div className="p-8 max-w-5xl mx-auto space-y-6">
-
-
-      {/* ========================================================
+    <div className="mx-auto max-w-5xl space-y-6 p-8">
+      {/* ======================================================
           HEADER DEL EVENTO
-          ======================================================== */}
+          ====================================================== */}
 
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b pb-6">
-
+      <div className="flex flex-col gap-4 border-b pb-6 md:flex-row md:items-center md:justify-between">
         <div>
-
           <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">
             Plan Logístico
           </span>
 
-          <h1 className="text-3xl font-bold text-gray-900">
-            {event.title}
-          </h1>
+          <h1 className="text-3xl font-bold text-gray-900">{event.title}</h1>
 
-          <p className="text-sm text-gray-500 mt-1">
-            {event.description}
-          </p>
-
+          <p className="mt-1 text-sm text-gray-500">{event.description}</p>
         </div>
 
-
         <button
-          className="self-start md:self-auto rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 shadow-sm transition"
+          type="button"
+          className="self-start rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 md:self-auto"
         >
           + Añadir Gestión Logística
         </button>
-
       </div>
 
+      {/* ======================================================
+          MENSAJE DE ÉXITO
+          ====================================================== */}
+
       {rescheduleSuccess && (
-        <p className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800" role="status" aria-live="polite">
+        <p
+          className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800"
+          role="status"
+          aria-live="polite"
+        >
           {rescheduleSuccess}
         </p>
       )}
 
-
-      {/* ========================================================
+      {/* ======================================================
           BARRA DE PROGRESO
-          ======================================================== */}
+          ====================================================== */}
 
-      <div className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm space-y-3">
-
-        <div className="flex justify-between items-center text-sm font-semibold">
-
+      <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between text-sm font-semibold">
           <span className="text-gray-700">
             Progreso de Preparación del Evento
           </span>
 
-          <span className="text-indigo-600 font-bold">
+          <span className="font-bold text-indigo-600">
             {progressPercentage}% Completado
           </span>
-
         </div>
 
-
-        <div className="h-3 w-full rounded-full bg-gray-100 overflow-hidden">
-
+        <div className="h-3 w-full overflow-hidden rounded-full bg-gray-100">
           <div
-            className="h-full bg-indigo-600 transition-all duration-500 rounded-full"
+            className="h-full rounded-full bg-indigo-600 transition-all duration-500"
             style={{
               width: `${progressPercentage}%`,
             }}
           />
-
         </div>
 
-
         <p className="text-xs text-gray-500">
-
-          {completedTasks} de {totalTasks} gestiones
-          logísticas ejecutadas.
-
+          {completedTasks} de {totalTasks} gestiones logísticas ejecutadas.
         </p>
-
       </div>
 
-
-      {/* ========================================================
+      {/* ======================================================
           LISTADO DE TAREAS
-          ======================================================== */}
+          ====================================================== */}
 
       <div className="space-y-4">
-
         <h2 className="text-xl font-bold text-gray-900">
           Gestiones Logísticas
         </h2>
 
-
         {event.tasks.length === 0 ? (
-
-          /* ======================================================
+          /* ====================================================
              EMPTY STATE
-             ====================================================== */
+             ==================================================== */
 
           <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center">
-
-            <p className="text-gray-500 text-sm">
+            <p className="text-sm text-gray-500">
               No hay gestiones planificadas para este evento aún.
             </p>
-
           </div>
-
         ) : (
-
           <div className="space-y-3">
-
             {event.tasks.map((task) => (
-
               <div
                 key={task.id}
-                className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:border-gray-300 transition"
+                className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:border-gray-300"
               >
-
                 <div className="flex items-center space-x-3">
-
-
                   {/* ==================================================
                       CHECKBOX
                       ================================================== */}
 
                   <input
                     type="checkbox"
-
-                    /*
-                     * El checkbox aparece marcado cuando
-                     * la tarea está completada.
-                     */
-                    checked={
-                      task.status === 'completed'
-                    }
-
-                    /*
-                     * Al hacer clic:
-                     *
-                     * pending   → completed
-                     * completed → pending
-                     *
-                     * y se realiza el PATCH al backend.
-                     */
+                    checked={task.status === "completed"}
                     onChange={() =>
-                      handleTaskStatusChange(
-                        task.id,
-                        task.status
-                      )
+                      handleTaskStatusChange(task.id, task.status)
                     }
-
-                    /*
-                     * Deshabilitamos temporalmente el checkbox
-                     * mientras se procesa el PATCH.
-                     */
-                    disabled={
-                      updatingTaskId === task.id
-                    }
-
+                    disabled={updatingTaskId === task.id}
                     className="h-5 w-5 rounded border-gray-300 text-indigo-600"
-
                   />
-
 
                   {/* ==================================================
                       INFORMACIÓN DE LA TAREA
                       ================================================== */}
 
                   <div>
-
                     <h3
                       className={`text-sm font-semibold ${
-                        task.status === 'completed'
-                          ? 'line-through text-gray-400'
-                          : 'text-gray-900'
+                        task.status === "completed"
+                          ? "text-gray-400 line-through"
+                          : "text-gray-900"
                       }`}
                     >
                       {task.title}
                     </h3>
 
-
                     <span className="text-xs text-gray-500">
-
                       Fecha: {task.scheduled_date}
-
-                      {' • '}
-
+                      {" • "}
                       Est: {task.estimated_hours}h
-
                     </span>
-
                   </div>
-
                 </div>
 
-
                 {/* ====================================================
-                    ESTADO DE LA TAREA
+                    ESTADO
                     ==================================================== */}
 
                 <span
                   className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    task.status === 'completed'
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-yellow-100 text-yellow-800'
+                    task.status === "completed"
+                      ? "bg-green-100 text-green-800"
+                      : "bg-yellow-100 text-yellow-800"
                   }`}
                 >
-
-                  {task.status === 'completed'
-                    ? 'Completado'
-                    : 'Pendiente'}
-
+                  {task.status === "completed" ? "Completado" : "Pendiente"}
                 </span>
+
+                {/* ====================================================
+                    REPROGRAMAR
+                    ==================================================== */}
 
                 <button
                   type="button"
@@ -592,28 +405,27 @@ export default function EventDetailPage() {
                 >
                   Reprogramar
                 </button>
-
               </div>
-
             ))}
-
           </div>
-
         )}
-
       </div>
 
+      {/* ======================================================
+          MODAL DE REPROGRAMACIÓN
+          ====================================================== */}
+
       <RescheduleModal
-        key={`${taskToReschedule?.id ?? 'none'}-${!!taskToReschedule}`}
+        key={`${taskToReschedule?.id ?? "none"}-${!!taskToReschedule}`}
         task={taskToReschedule}
         open={!!taskToReschedule}
         onOpenChange={(open) => !open && setTaskToReschedule(null)}
         onSuccess={() => {
-          setRescheduleSuccess('✅ Conflicto resuelto');
+          setRescheduleSuccess("Fecha actualizada");
+
           loadEvent();
         }}
       />
-
     </div>
   );
 }

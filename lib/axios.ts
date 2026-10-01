@@ -25,16 +25,32 @@ apiClient.interceptors.request.use(
 );
 
 // ─── Response interceptor: maneja 401 y hace logout automático ───────────────
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      if (typeof window !== "undefined") {
+      const requestUrl = error.config?.url ?? "";
+
+      // El login debe manejar su propio 401 para mostrar
+      // "Credenciales inválidas..." en la interfaz.
+      const isLoginRequest = requestUrl.includes("/auth/login/");
+
+      // El refresh también debe manejar su propio error.
+      const isRefreshRequest = requestUrl.includes("/auth/token/refresh/");
+
+      if (
+        typeof window !== "undefined" &&
+        !isLoginRequest &&
+        !isRefreshRequest
+      ) {
         localStorage.removeItem("access_token");
         localStorage.removeItem("refresh_token");
+
         window.location.href = "/login";
       }
     }
+
     return Promise.reject(error);
   },
 );
