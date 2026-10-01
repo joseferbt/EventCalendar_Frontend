@@ -46,7 +46,20 @@ export interface CreateTaskPayload {
 export type UpdateTaskPayload = Partial<CreateTaskPayload>;
 
 export interface ReschedulePayload {
-  scheduled_date: string; // YYYY-MM-DD, igual al DateField del backend
+  new_date?: string;
+  new_hours?: number;
+  reason?: string;
+  scheduled_date?: string;
+  estimated_hours?: number;
+}
+
+export interface DailyOverloadConflictError {
+  error: string;
+  detail: string;
+  target_date: string;
+  current_hours: string;
+  attempted_hours: string;
+  daily_hour_limit: string;
 }
 
 export interface ConflictData {
@@ -57,4 +70,5 @@ export interface ConflictData {
   taskToReschedule?: Task;
 }
 
-export type ResolutionAction = 'MOVE_DATE' | 'REDUCE_HOURS' | 'FORCE';
+export type ResolutionAction = 'MOVE_DATE' | 'REDUCE_HOURS' | 'FORCE' | 'CANCEL';
+
