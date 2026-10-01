@@ -60,6 +60,8 @@ export interface DailyOverloadConflictError {
   current_hours: string;
   attempted_hours: string;
   daily_hour_limit: string;
+  /** Fechas alternativas con capacidad disponible (puede ser lista vacía). */
+  suggested_dates: string[];
 }
 
 export interface ConflictData {

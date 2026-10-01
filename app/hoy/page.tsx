@@ -103,7 +103,7 @@ export default function TodayPage() {
           </>}
         </div>
       </main>
-      <RescheduleModal key={`${selectedTask?.id ?? "none"}-${!!selectedTask}`} task={selectedTask} open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)} onSuccess={() => { setSuccessMessage("Fecha actualizada"); refetch(); }} />
+      <RescheduleModal key={`${selectedTask?.id ?? "none"}-${!!selectedTask}`} task={selectedTask} open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)} onSuccess={() => { setSuccessMessage("✅ Conflicto resuelto"); refetch(); }} />
     </div>
   );
 }

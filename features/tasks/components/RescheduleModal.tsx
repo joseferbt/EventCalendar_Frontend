@@ -18,14 +18,18 @@ import { Label } from "@/components/ui/label";
 import { useRescheduleTask } from "../hooks/useTasks";
 import type { DailyOverloadConflictError } from "../types";
 
+// ─── Constantes de validación (deben coincidir con el backend) ────────────────
+const MIN_TASK_HOURS = 0.25;
+const MAX_TASK_HOURS = 24;
+
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 const rescheduleSchema = z.object({
   scheduled_date: z.string().min(1, "La nueva fecha es requerida"),
   estimated_hours: z.coerce
     .number()
-    .min(0.5, "Las horas estimadas deben ser al menos 0.5")
-    .max(24, "Horas estimadas inválidas"),
+    .min(MIN_TASK_HOURS, `Las horas deben ser al menos ${MIN_TASK_HOURS}`)
+    .max(MAX_TASK_HOURS, `Las horas no pueden superar ${MAX_TASK_HOURS}`),
   reason: z.string().optional(),
 });
 
@@ -53,12 +57,15 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
   const { mutateAsync: reschedule, isPending } = useRescheduleTask(task?.id ?? 0);
   const [conflict, setConflict] = useState<DailyOverloadConflictError | null>(null);
   const [genericError, setGenericError] = useState<string | null>(null);
+  /** true cuando el último intento falló y el día sigue sobrecargado */
+  const [stillOverloaded, setStillOverloaded] = useState(false);
 
   const defaultHours = task?.estimated_hours ? Number(task.estimated_hours) : 2;
 
   const {
     register,
     handleSubmit,
+    setValue,
     setFocus,
     reset,
     formState: { errors },
@@ -74,13 +81,21 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
   const handleClose = () => {
     setConflict(null);
     setGenericError(null);
+    setStillOverloaded(false);
     onOpenChange(false);
+  };
+
+  /** Inyecta una fecha sugerida en el campo y mueve el foco al botón submit */
+  const applySuggestedDate = (dateStr: string) => {
+    setValue("scheduled_date", dateStr, { shouldValidate: true });
+    setFocus("scheduled_date");
   };
 
   const onSubmit = async (values: RescheduleFormValues) => {
     if (!task) return;
     setConflict(null);
     setGenericError(null);
+    setStillOverloaded(false);
 
     try {
       await reschedule({
@@ -88,32 +103,34 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
         new_hours: values.estimated_hours,
         reason: values.reason || "Reprogramación de tarea",
       });
+      // ✅ Mensaje exacto requerido por el DoD
       onSuccess?.();
       reset();
       handleClose();
     } catch (err: unknown) {
-      // Los datos ingresados se conservan en el formulario mientras se resuelve el conflicto.
+      // Los datos del formulario se conservan para permitir reintentar (DoD)
       if (axios.isAxiosError(err) && err.response?.status === 409) {
         const errorData = err.response.data as DailyOverloadConflictError;
         setConflict(errorData);
+        // Detectar si es un reintento que también falló → "día continúa sobrecargado"
+        setStillOverloaded(conflict !== null);
       } else if (axios.isAxiosError(err) && err.response?.data?.detail) {
         const detail = err.response.data.detail;
-        setGenericError(typeof detail === "string" ? detail : "Error al reprogramar la subtarea");
+        setGenericError(typeof detail === "string" ? detail : "Error al reprogramar la subtarea.");
       } else {
         setGenericError("No se pudo reprogramar. Verifica los datos e inténtalo de nuevo.");
       }
     }
   };
 
+  const hasSuggestions = conflict && conflict.suggested_dates && conflict.suggested_dates.length > 0;
+
   return (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) {
-          handleClose();
-        } else {
-          onOpenChange(true);
-        }
+        if (!nextOpen) handleClose();
+        else onOpenChange(true);
       }}
     >
       <DialogContent className="sm:max-w-lg">
@@ -126,7 +143,7 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
           </DialogDescription>
         </DialogHeader>
 
-        {/* ALERTA DE SOBRECARGA (DOD) */}
+        {/* ── ALERTA DE SOBRECARGA (DoD: mostrar alternativas) ── */}
         {conflict && (
           <div
             id="overload-alert"
@@ -141,19 +158,23 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
               <div className="space-y-1 flex-1">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-red-900 text-sm">
-                    Conflicto de Sobrecarga Diaria
+                    {stillOverloaded
+                      ? "El día continúa sobrecargado"
+                      : "Conflicto de Sobrecarga Diaria"}
                   </h4>
                   <span className="rounded-full bg-red-200 px-2 py-0.5 text-[11px] font-semibold text-red-800">
                     Límite excedido
                   </span>
                 </div>
                 <p className="text-xs text-red-800 font-medium leading-relaxed">
-                  {conflict.detail}
+                  {stillOverloaded
+                    ? `Aún se exceden las ${conflict.daily_hour_limit}h diarias. Ajusta la fecha u horas para resolver el conflicto.`
+                    : conflict.detail}
                 </p>
               </div>
             </div>
 
-            {/* Métricas de horas */}
+            {/* Métricas de carga del día */}
             <div className="grid grid-cols-3 gap-2 rounded-lg bg-white/90 p-2.5 text-center text-xs border border-red-200">
               <div>
                 <span className="block text-[11px] text-gray-500 font-medium">Horas actuales</span>
@@ -169,7 +190,33 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
               </div>
             </div>
 
-            {/* Opciones de resolución según DOD: Ajustar horas, Cambiar fecha o Cancelar */}
+            {/* ── Fechas sugeridas (DoD: chips de fecha sugerida) ── */}
+            {hasSuggestions ? (
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-semibold text-gray-700 uppercase tracking-wide">
+                  Fechas con disponibilidad:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {conflict.suggested_dates.map((dateStr) => (
+                    <button
+                      key={dateStr}
+                      type="button"
+                      onClick={() => applySuggestedDate(dateStr)}
+                      className="inline-flex items-center gap-1 rounded-md bg-green-50 border border-green-300 px-2.5 py-1 text-xs font-semibold text-green-800 hover:bg-green-100 transition-colors"
+                    >
+                      📅 {dateStr}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              /* ── Sin sugerencias → informar fecha manual (DoD) ── */
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                📋 No hay fechas disponibles automáticamente para los próximos días. Por favor ingresa una fecha manualmente en el campo &quot;Nueva fecha&quot;.
+              </p>
+            )}
+
+            {/* Accesos rápidos a los campos */}
             <div className="border-t border-red-200 pt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
               <span className="text-red-900 font-medium text-[11px]">
                 Opciones para resolver el conflicto:
@@ -207,6 +254,7 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
           </div>
         )}
 
+        {/* Error genérico (datos conservados para reintentar – DoD) */}
         {genericError && (
           <div
             role="alert"
@@ -237,17 +285,17 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
               )}
             </div>
 
-            {/* Campo Horas estimadas */}
+            {/* Campo Horas estimadas (DoD: rango 0.25–24) */}
             <div className="space-y-1">
               <Label htmlFor="reschedule-hours" className="text-xs font-semibold text-gray-700">
-                Horas estimadas *
+                Horas estimadas * <span className="font-normal text-gray-400">({MIN_TASK_HOURS}–{MAX_TASK_HOURS}h)</span>
               </Label>
               <Input
                 id="reschedule-hours"
                 type="number"
-                step="0.5"
-                min="0.5"
-                max="24"
+                step="0.25"
+                min={MIN_TASK_HOURS}
+                max={MAX_TASK_HOURS}
                 aria-invalid={!!errors.estimated_hours}
                 className={`text-sm ${conflict ? "border-amber-400 bg-amber-50/20" : ""}`}
                 {...register("estimated_hours")}
@@ -260,7 +308,7 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
             </div>
           </div>
 
-          {/* Campo Motivo de reprogramación */}
+          {/* Campo Motivo */}
           <div className="space-y-1">
             <Label htmlFor="reschedule-reason" className="text-xs font-semibold text-gray-700">
               Motivo de reprogramación
@@ -285,7 +333,11 @@ export function RescheduleModal({ task, open, onOpenChange, onSuccess }: Resched
             <Button
               type="submit"
               disabled={isPending}
-              className={conflict ? "bg-amber-600 hover:bg-amber-700 text-white" : "bg-indigo-600 hover:bg-indigo-700 text-white"}
+              className={
+                conflict
+                  ? "bg-amber-600 hover:bg-amber-700 text-white"
+                  : "bg-indigo-600 hover:bg-indigo-700 text-white"
+              }
             >
               {isPending
                 ? "Guardando..."

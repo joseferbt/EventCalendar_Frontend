@@ -609,7 +609,7 @@ export default function EventDetailPage() {
         open={!!taskToReschedule}
         onOpenChange={(open) => !open && setTaskToReschedule(null)}
         onSuccess={() => {
-          setRescheduleSuccess('Fecha actualizada');
+          setRescheduleSuccess('✅ Conflicto resuelto');
           loadEvent();
         }}
       />
